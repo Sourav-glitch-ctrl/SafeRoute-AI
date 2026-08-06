@@ -1,0 +1,30 @@
+# Environment
+.env
+
+# Virtual environments
+.venv/
+venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Model files
+ml/saved_models/
+
+# Dataset
+ml/data/raw/
+ml/data/processed/
+
+# Node
+frontend/node_modules/
+
+# VS Code
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
