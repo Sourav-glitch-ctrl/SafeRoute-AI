@@ -75,19 +75,6 @@ def select_columns(df: pl.DataFrame) -> pl.DataFrame:
     print("Selecting required columns...")
     return df.select(KEEP_COLUMNS)
 
-
-# ---------------------------------------------------------------------
-# Remove Duplicate Records
-# ---------------------------------------------------------------------
-
-def remove_duplicates(df: pl.DataFrame) -> pl.DataFrame:
-    """
-    Remove duplicate rows from the dataset.
-    """
-    print("Removing duplicate rows...")
-    return df.unique()
-
-
 # ---------------------------------------------------------------------
 # Handle Missing Values
 # ---------------------------------------------------------------------
@@ -177,8 +164,6 @@ def main() -> None:
     original_shape = (df.height, df.width)
 
     df = select_columns(df)
-
-    df = remove_duplicates(df)
 
     df = handle_missing_values(df)
 
