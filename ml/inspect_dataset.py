@@ -1,26 +1,34 @@
-from datasets import load_dataset
+from pathlib import Path
+import polars as pl
+
+BASE_DIR = Path(__file__).resolve().parent
+
+RAW_FILE = (
+    BASE_DIR /
+    "data" /
+    "raw" /
+    "us_accidents.parquet"
+)
+
+df = pl.read_parquet(RAW_FILE)
 
 print("=" * 80)
 print("Loading dataset...")
 print("=" * 80)
 
-dataset = load_dataset("yuvidhepe/us-accidents-updated")
-
-train = dataset["train"]
-
 print("\nDataset Summary")
 print("-" * 80)
-print(dataset)
+print(df)
 
 print("\nNumber of rows:")
-print(len(train))
+print(len(df))
 
 print("\nNumber of columns:")
-print(len(train.column_names))
+print(len(df.columns))
 
 print("\nColumn Names:")
-for col in train.column_names:
+for col in df.columns:
     print(f"- {col}")
 
 print("\nFirst Record:")
-print(train[0])
+print(df[0])
