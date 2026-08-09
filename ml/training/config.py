@@ -111,3 +111,13 @@ RANDOM_STATE = 42
 
 # Number of CPU threads where supported
 N_JOBS = -1
+
+# Random Forest Training Configuration
+# Random Forest is memory-intensive on the full 5.4M-row training set.
+# Therefore, a stratified subset is used only for Random Forest training.
+
+RANDOM_FOREST_TRAIN_SIZE = 1_500_000
+
+RANDOM_FOREST_N_ESTIMATORS = 100
+
+RANDOM_FOREST_N_JOBS = 4

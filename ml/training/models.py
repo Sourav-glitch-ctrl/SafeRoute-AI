@@ -44,18 +44,15 @@ def get_logistic_regression():
 # ---------------------------------------------------------------------
 
 def get_random_forest():
-    """
-    Create the Random Forest classifier.
-    Balanced class weights are used to give greater importance
-    to minority Severity classes.
-    """
-
     return RandomForestClassifier(
         n_estimators=200,
-        class_weight="balanced",
-        random_state=RANDOM_STATE,
-        n_jobs=N_JOBS,
         max_depth=None,
+        min_samples_split=2,
+        min_samples_leaf=1,
+        max_features="sqrt",
+        class_weight="balanced_subsample",
+        random_state=RANDOM_STATE,
+        n_jobs=-1,
     )
 
 
@@ -66,6 +63,7 @@ def get_random_forest():
 def get_xgboost():
     """
     Create the XGBoost multiclass classifier.
+
     XGBoost does not directly use class_weight like
     RandomForest and LogisticRegression.
     Class balancing will be handled separately during
@@ -73,18 +71,18 @@ def get_xgboost():
     """
 
     return XGBClassifier(
-    objective="multi:softprob",
-    num_class=4,
-    n_estimators=300,
-    learning_rate=0.05,
-    max_depth=8,
-    subsample=0.8,
-    colsample_bytree=0.8,
-    random_state=RANDOM_STATE,
-    n_jobs=N_JOBS,
-    eval_metric="mlogloss",
-    tree_method="hist",
-)
+        objective="multi:softprob",
+        num_class=4,
+        n_estimators=200,
+        learning_rate=0.05,
+        max_depth=8,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        random_state=RANDOM_STATE,
+        n_jobs=4,
+        eval_metric="mlogloss",
+        tree_method="hist",
+    )
 
 # ---------------------------------------------------------------------
 # LightGBM
@@ -94,22 +92,26 @@ def get_lightgbm():
     """
     Create the LightGBM multiclass classifier.
 
-    LightGBM is included because it is highly efficient for
-    large tabular datasets and will be compared against XGBoost.
+    LightGBM supports multiclass classification directly.
+    Class labels can remain as 1, 2, 3, 4.
     """
 
     return LGBMClassifier(
         objective="multiclass",
         num_class=4,
-        n_estimators=300,
+
+        n_estimators=200,
         learning_rate=0.05,
         max_depth=-1,
         num_leaves=31,
+
         subsample=0.8,
         colsample_bytree=0.8,
+
         random_state=RANDOM_STATE,
-        n_jobs=N_JOBS,
-        verbosity=-1,
+        n_jobs=4,
+
+        verbosity=-1
     )
 
 
