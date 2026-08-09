@@ -2,7 +2,6 @@ import sys
 from pathlib import Path
 import numpy as np
 import pandas as pd
-import pandas as pd
 import polars as pl
 
 from sklearn.model_selection import train_test_split

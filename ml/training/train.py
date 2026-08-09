@@ -1,12 +1,15 @@
 """
-Using Train.py we are going to train the model using the dataset that we have
-prepared in the previous step.
+SafeRoute AI - Machine Learning Training
 
-The models that we are going to use are:
+Models available:
+
 1. Logistic Regression
 2. Random Forest
 3. XGBoost
 4. LightGBM
+
+Current selected model:
+Random Forest
 """
 
 from pathlib import Path
@@ -47,16 +50,44 @@ from models import get_models
 # Model Selection
 # ---------------------------------------------------------------------
 
-# We start with Random Forest after completing Logistic Regression
-# as our baseline.
-#
-# Later we will change this to:
-#
-# "Logistic Regression"
-# "XGBoost"
-# "LightGBM"
-
 SELECTED_MODEL = "Random Forest"
+
+
+# ---------------------------------------------------------------------
+# Save Preprocessing Artifacts
+# ---------------------------------------------------------------------
+
+def save_preprocessing_artifacts(
+    encoder,
+    categorical_columns,
+):
+    """
+    Save preprocessing objects required during inference.
+
+    The same encoder used during training must be used during
+    prediction to ensure categorical values are encoded consistently.
+    """
+
+    preprocessing_path = (
+        MODEL_DIR / "preprocessing.pkl"
+    )
+
+    preprocessing_artifacts = {
+        "encoder": encoder,
+        "categorical_columns": categorical_columns,
+    }
+
+    joblib.dump(
+        preprocessing_artifacts,
+        preprocessing_path,
+    )
+
+    print(
+        f"\nPreprocessing artifacts saved successfully at:\n"
+        f"{preprocessing_path}"
+    )
+
+    return preprocessing_path
 
 
 # ---------------------------------------------------------------------
@@ -67,15 +98,13 @@ def train_model(
     model,
     X_train,
     y_train,
-    X_val,
-    y_val,
 ):
     """
     Train the selected machine learning model.
 
     XGBoost requires class labels to start from 0.
-    Therefore, Severity values 1-4 are converted to
-    0-3 only during XGBoost training.
+    Therefore, Severity values 1-4 are converted to 0-3
+    only during XGBoost training.
     """
 
     print("\n" + "=" * 70)
@@ -87,8 +116,7 @@ def train_model(
     print("\nTraining model...")
 
     # -------------------------------------------------------------
-    # XGBoost requires classes 0, 1, 2, 3
-    # Original Severity values are 1, 2, 3, 4
+    # XGBoost label conversion
     # -------------------------------------------------------------
 
     if SELECTED_MODEL == "XGBoost":
@@ -99,10 +127,9 @@ def train_model(
         )
 
         y_train = y_train - 1
-        y_val = y_val - 1
 
     # -------------------------------------------------------------
-    # Train model
+    # Train
     # -------------------------------------------------------------
 
     start_time = time.perf_counter()
@@ -141,10 +168,12 @@ def save_model(
 
         ml/saved_models/
 
-    Example:
+    Examples:
 
         logistic_regression.pkl
         random_forest.pkl
+        xgboost.pkl
+        lightgbm.pkl
     """
 
     safe_name = (
@@ -214,18 +243,24 @@ def main():
     model = models[SELECTED_MODEL]
 
     # -------------------------------------------------------------
-    # Model-specific training data
+    # Save preprocessing artifacts
+    # -------------------------------------------------------------
+
+    preprocessing_path = save_preprocessing_artifacts(
+        encoder,
+        categorical_columns,
+    )
+
+    # -------------------------------------------------------------
+    # Default training data
     # -------------------------------------------------------------
 
     X_model_train = X_train
     y_model_train = y_train
 
-    # Random Forest is memory-intensive when trained on the complete
-    # 5.4M-row training dataset.
-    #
-    # Therefore, only Random Forest uses a stratified subset.
-    #
-    # Validation and testing datasets remain unchanged.
+    # -------------------------------------------------------------
+    # Random Forest training subset
+    # -------------------------------------------------------------
 
     if SELECTED_MODEL == "Random Forest":
 
@@ -242,13 +277,6 @@ def main():
             )
         )
 
-    else:
-        # XGBoost, LightGBM and Logistic Regression
-        # use the complete training dataset.
-
-        X_model_train = X_train
-        y_model_train = y_train
-
     # -------------------------------------------------------------
     # Train model
     # -------------------------------------------------------------
@@ -257,8 +285,6 @@ def main():
         model,
         X_model_train,
         y_model_train,
-        X_val,
-        y_val,
     )
 
     # -------------------------------------------------------------
@@ -278,7 +304,10 @@ def main():
     print("Training Summary")
     print("=" * 70)
 
-    print(f"Model                    : {SELECTED_MODEL}")
+    print(
+        f"Model                    : "
+        f"{SELECTED_MODEL}"
+    )
 
     print(
         f"Original Training Rows   : "
@@ -308,6 +337,11 @@ def main():
     print(
         f"Saved Model              : "
         f"{model_path}"
+    )
+
+    print(
+        f"Preprocessing Artifacts  : "
+        f"{preprocessing_path}"
     )
 
     print("\n" + "=" * 70)
