@@ -1,11 +1,15 @@
 """
-This module evaluates trained machine learning models using
-the validation dataset.
-Evaluation metrics are:
+SafeRoute AI - Model Evaluation
+
+This module evaluates the selected trained machine learning model
+using the untouched testing dataset.
+
+Evaluation metrics:
 - Accuracy
-- Precision
-- Recall
-- F1 Score
+- Weighted Precision
+- Weighted Recall
+- Weighted F1 Score
+- Macro F1 Score
 - Classification Report
 - Confusion Matrix
 
@@ -30,12 +34,20 @@ from sklearn.metrics import (
     confusion_matrix,
 )
 
-TRAINING_DIR = Path(__file__).resolve().parent.parent / "training"
+
+# ---------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------
+
+TRAINING_DIR = (
+    Path(__file__).resolve().parent.parent / "training"
+)
 
 sys.path.insert(
     0,
     str(TRAINING_DIR)
 )
+
 
 from config import (
     DATA_FILE,
@@ -48,11 +60,16 @@ from config import (
     TEST_SIZE,
 )
 
+
+# ---------------------------------------------------------------------
 # Model Configuration
+# ---------------------------------------------------------------------
 
 MODEL_NAME = "random_forest"
 
-MODEL_FILE = (MODEL_DIR/ f"{MODEL_NAME}.pkl")
+MODEL_FILE = (
+    MODEL_DIR / f"{MODEL_NAME}.pkl"
+)
 
 METRICS_FILE = (
     METRICS_DIR
@@ -83,7 +100,9 @@ def load_dataset():
 
     df = pd.read_parquet(DATA_FILE)
 
-    print(f"Dataset Shape : {df.shape}")
+    print(
+        f"Dataset Shape : {df.shape}"
+    )
 
     return df
 
@@ -96,9 +115,6 @@ def prepare_data(df):
     """
     Separate features and target and encode categorical features.
 
-    The same categorical encoding strategy used during training
-    is applied here.
-
     Returns:
         X : Feature dataframe
         y : Target series
@@ -106,21 +122,39 @@ def prepare_data(df):
 
     print("\nSeparating features and target...")
 
-    X = df.drop(columns=[TARGET_COLUMN])
+    X = df.drop(
+        columns=[TARGET_COLUMN]
+    )
+
     y = df[TARGET_COLUMN]
 
-    print(f"Features Shape : {X.shape}")
-    print(f"Target Shape   : {y.shape}")
+    print(
+        f"Features Shape : {X.shape}"
+    )
+
+    print(
+        f"Target Shape   : {y.shape}"
+    )
 
     # -------------------------------------------------------------
     # Encode categorical features
     # -------------------------------------------------------------
 
-    print("\nEncoding categorical features...")
+    print(
+        "\nEncoding categorical features..."
+    )
 
-    categorical_columns = X.select_dtypes(
-        include=["object", "string", "category"]
-    ).columns.tolist()
+    categorical_columns = (
+        X.select_dtypes(
+            include=[
+                "object",
+                "string",
+                "category",
+            ]
+        )
+        .columns
+        .tolist()
+    )
 
     print(
         f"Categorical Features : "
@@ -133,6 +167,7 @@ def prepare_data(df):
             X[column]
             .astype("category")
             .cat.codes
+            .astype("float32")
         )
 
     return X, y
@@ -153,37 +188,63 @@ def create_split(X, y):
         Testing    -> 15%
 
     Returns:
-        X_train, X_validation, X_test,
-        y_train, y_validation, y_test
+        X_train
+        X_validation
+        X_test
+        y_train
+        y_validation
+        y_test
     """
 
-    print("\nCreating dataset split...")
+    print(
+        "\nCreating dataset split..."
+    )
 
-    # First split:
+    # -------------------------------------------------------------
+    # First split
+    # -------------------------------------------------------------
     # 70% training
     # 30% temporary
-    X_train, X_temp, y_train, y_temp = train_test_split(
-        X,
-        y,
-        test_size=(
-            VALIDATION_SIZE + TEST_SIZE
-        ),
-        stratify=y,
-        random_state=RANDOM_STATE,
+
+    X_train, X_temp, y_train, y_temp = (
+        train_test_split(
+            X,
+            y,
+            test_size=(
+                VALIDATION_SIZE
+                + TEST_SIZE
+            ),
+            stratify=y,
+            random_state=RANDOM_STATE,
+        )
     )
 
-    # Second split:
-    # Divide temporary 30% equally
-    # into validation and testing
+    # -------------------------------------------------------------
+    # Second split
+    # -------------------------------------------------------------
+    # Temporary 30% is divided into:
+    # 15% validation
+    # 15% testing
+
     validation_ratio = (
         VALIDATION_SIZE
-        / (VALIDATION_SIZE + TEST_SIZE)
+        / (
+            VALIDATION_SIZE
+            + TEST_SIZE
+        )
     )
 
-    X_validation, X_test, y_validation, y_test = train_test_split(
+    (
+        X_validation,
+        X_test,
+        y_validation,
+        y_test,
+    ) = train_test_split(
         X_temp,
         y_temp,
-        test_size=(1 - validation_ratio),
+        test_size=(
+            1 - validation_ratio
+        ),
         stratify=y_temp,
         random_state=RANDOM_STATE,
     )
@@ -218,12 +279,20 @@ def create_split(X, y):
 
 def load_model():
     """
-    Load the trained Logistic Regression model.
+    Load the selected trained model.
     """
 
-    print("\n" + "=" * 70)
-    print("Loading Trained Model")
-    print("=" * 70)
+    print(
+        "\n" + "=" * 70
+    )
+
+    print(
+        "Loading Trained Model"
+    )
+
+    print(
+        "=" * 70
+    )
 
     print(
         f"Model : {MODEL_NAME}"
@@ -252,43 +321,59 @@ def load_model():
 
 
 # ---------------------------------------------------------------------
-# Evaluate Model
+# Evaluate Model on Test Set
 # ---------------------------------------------------------------------
 
 def evaluate_model(
     model,
-    X_validation,
-    y_validation,
+    X_test,
+    y_test,
 ):
     """
-    Evaluate the trained model on the validation dataset.
+    Evaluate the trained model on the untouched testing dataset.
 
     Returns:
-        Dictionary containing evaluation metrics.
+        metrics
+        confusion matrix
     """
 
-    print("\n" + "=" * 70)
-    print("Evaluating Model")
-    print("=" * 70)
+    print(
+        "\n" + "=" * 70
+    )
 
     print(
-        f"Validation Rows : "
-        f"{len(X_validation):,}"
+        "Evaluating Model on Test Set"
+    )
+
+    print(
+        "=" * 70
+    )
+
+    print(
+        f"Testing Rows : "
+        f"{len(X_test):,}"
     )
 
     start_time = time.time()
 
-    print("\nGenerating predictions...")
-
-    y_pred = model.predict(
-        X_validation
+    print(
+        "\nGenerating predictions..."
     )
 
-    # XGBoost was trained using labels [0, 1, 2, 3].
-    # Convert predictions back to the original Severity labels [1, 2, 3, 4].
+    y_pred = model.predict(
+        X_test
+    )
+
+    # -------------------------------------------------------------
+    # Convert XGBoost labels back to original Severity labels
+    # -------------------------------------------------------------
 
     if MODEL_NAME == "xgboost":
-        y_pred = y_pred.astype(int) + 1
+
+        y_pred = (
+            y_pred.astype(int)
+            + 1
+        )
 
     evaluation_time = (
         time.time() - start_time
@@ -299,33 +384,33 @@ def evaluate_model(
     # -------------------------------------------------------------
 
     accuracy = accuracy_score(
-        y_validation,
+        y_test,
         y_pred,
     )
 
     precision = precision_score(
-        y_validation,
+        y_test,
         y_pred,
         average="weighted",
         zero_division=0,
     )
 
     recall = recall_score(
-        y_validation,
+        y_test,
         y_pred,
         average="weighted",
         zero_division=0,
     )
 
     f1_weighted = f1_score(
-        y_validation,
+        y_test,
         y_pred,
         average="weighted",
         zero_division=0,
     )
 
     f1_macro = f1_score(
-        y_validation,
+        y_test,
         y_pred,
         average="macro",
         zero_division=0,
@@ -336,13 +421,13 @@ def evaluate_model(
     # -------------------------------------------------------------
 
     report = classification_report(
-        y_validation,
+        y_test,
         y_pred,
         zero_division=0,
     )
 
     report_dict = classification_report(
-        y_validation,
+        y_test,
         y_pred,
         output_dict=True,
         zero_division=0,
@@ -353,36 +438,50 @@ def evaluate_model(
     # -------------------------------------------------------------
 
     matrix = confusion_matrix(
-        y_validation,
+        y_test,
         y_pred,
+        labels=[1, 2, 3, 4],
     )
 
     # -------------------------------------------------------------
     # Print Results
     # -------------------------------------------------------------
 
-    print("\n" + "=" * 70)
-    print("Evaluation Results")
-    print("=" * 70)
-
     print(
-        f"Accuracy           : {accuracy:.4f}"
+        "\n" + "=" * 70
     )
 
     print(
-        f"Weighted Precision : {precision:.4f}"
+        "Test Set Evaluation Results"
     )
 
     print(
-        f"Weighted Recall    : {recall:.4f}"
+        "=" * 70
     )
 
     print(
-        f"Weighted F1 Score  : {f1_weighted:.4f}"
+        f"Accuracy           : "
+        f"{accuracy:.4f}"
     )
 
     print(
-        f"Macro F1 Score     : {f1_macro:.4f}"
+        f"Weighted Precision : "
+        f"{precision:.4f}"
+    )
+
+    print(
+        f"Weighted Recall    : "
+        f"{recall:.4f}"
+    )
+
+    print(
+        f"Weighted F1 Score  : "
+        f"{f1_weighted:.4f}"
+    )
+
+    print(
+        f"Macro F1 Score     : "
+        f"{f1_macro:.4f}"
     )
 
     print(
@@ -390,47 +489,72 @@ def evaluate_model(
         f"{evaluation_time:.2f} seconds"
     )
 
-    print("\nClassification Report")
-    print("-" * 70)
+    print(
+        "\nClassification Report"
+    )
+
+    print(
+        "-" * 70
+    )
 
     print(report)
 
-    print("\nConfusion Matrix")
-    print("-" * 70)
+    print(
+        "\nConfusion Matrix"
+    )
+
+    print(
+        "-" * 70
+    )
 
     print(matrix)
 
     # -------------------------------------------------------------
-    # Create Metrics Dictionary
+    # Metrics Dictionary
     # -------------------------------------------------------------
 
     metrics = {
+
         "model": MODEL_NAME,
-        "validation_rows": int(
-            len(X_validation)
+
+        "evaluation_dataset": "test",
+
+        "test_rows": int(
+            len(X_test)
         ),
+
         "accuracy": float(
             accuracy
         ),
+
         "precision_weighted": float(
             precision
         ),
+
         "recall_weighted": float(
             recall
         ),
+
         "f1_weighted": float(
             f1_weighted
         ),
+
         "f1_macro": float(
             f1_macro
         ),
+
         "evaluation_time_seconds": float(
             evaluation_time
         ),
-        "classification_report": report_dict,
+
+        "classification_report":
+            report_dict,
     }
 
-    return metrics, matrix
+    return (
+        metrics,
+        matrix,
+    )
 
 
 # ---------------------------------------------------------------------
@@ -442,13 +566,30 @@ def save_results(
     confusion_matrix_data,
 ):
     """
-    Save evaluation metrics as JSON and the confusion matrix
-    as CSV.
+    Save test-set evaluation metrics as JSON
+    and confusion matrix as CSV.
     """
 
-    print("\n" + "=" * 70)
-    print("Saving Evaluation Results")
-    print("=" * 70)
+    print(
+        "\n" + "=" * 70
+    )
+
+    print(
+        "Saving Evaluation Results"
+    )
+
+    print(
+        "=" * 70
+    )
+
+    # -------------------------------------------------------------
+    # Ensure metrics directory exists
+    # -------------------------------------------------------------
+
+    METRICS_DIR.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
 
     # -------------------------------------------------------------
     # Save Metrics
@@ -511,17 +652,35 @@ def main():
     """
 
     print("\n")
-    print("=" * 70)
-    print("SafeRoute AI - Model Evaluation")
-    print("=" * 70)
 
+    print(
+        "=" * 70
+    )
+
+    print(
+        "SafeRoute AI - Final Model Evaluation"
+    )
+
+    print(
+        "=" * 70
+    )
+
+    # -------------------------------------------------------------
     # Load dataset
+    # -------------------------------------------------------------
+
     df = load_dataset()
 
+    # -------------------------------------------------------------
     # Prepare features and target
+    # -------------------------------------------------------------
+
     X, y = prepare_data(df)
 
+    # -------------------------------------------------------------
     # Create train/validation/test split
+    # -------------------------------------------------------------
+
     (
         X_train,
         X_validation,
@@ -534,25 +693,47 @@ def main():
         y,
     )
 
-    # Load trained model
+    # -------------------------------------------------------------
+    # Load selected model
+    # -------------------------------------------------------------
+
     model = load_model()
 
-    # Evaluate using validation set
-    metrics, confusion_matrix_data = evaluate_model(
+    # -------------------------------------------------------------
+    # IMPORTANT:
+    # Evaluate ONLY on the untouched TEST set.
+    # -------------------------------------------------------------
+
+    (
+        metrics,
+        confusion_matrix_data,
+    ) = evaluate_model(
         model,
-        X_validation,
-        y_validation,
+        X_test,
+        y_test,
     )
 
+    # -------------------------------------------------------------
     # Save results
+    # -------------------------------------------------------------
+
     save_results(
         metrics,
         confusion_matrix_data,
     )
 
-    print("\n" + "=" * 70)
-    print("Model Evaluation Completed Successfully!")
-    print("=" * 70)
+    print(
+        "\n" + "=" * 70
+    )
+
+    print(
+        "Final Model Evaluation "
+        "Completed Successfully!"
+    )
+
+    print(
+        "=" * 70
+    )
 
 
 # ---------------------------------------------------------------------
