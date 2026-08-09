@@ -45,14 +45,10 @@ def get_logistic_regression():
 
 def get_random_forest():
     return RandomForestClassifier(
-        n_estimators=200,
-        max_depth=None,
-        min_samples_split=2,
-        min_samples_leaf=1,
-        max_features="sqrt",
-        class_weight="balanced_subsample",
+        n_estimators=100,
+        n_jobs=4,
         random_state=RANDOM_STATE,
-        n_jobs=-1,
+        class_weight="balanced_subsample",
     )
 
 
