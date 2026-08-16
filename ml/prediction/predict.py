@@ -35,13 +35,27 @@ PREPROCESSING_FILE = (
 
 
 # ---------------------------------------------------------------------
+# Module-level cache (loaded once, reused for every request)
+# ---------------------------------------------------------------------
+
+_model         = None
+_encoder       = None
+_cat_columns   = None
+
+
+# ---------------------------------------------------------------------
 # Load Model
 # ---------------------------------------------------------------------
 
 def load_model():
     """
-    Load the trained Random Forest model.
+    Load the trained Random Forest model (cached after first load).
     """
+
+    global _model
+
+    if _model is not None:
+        return _model
 
     if not MODEL_FILE.exists():
         raise FileNotFoundError(
@@ -50,17 +64,13 @@ def load_model():
             "Run ml/training/train.py first."
         )
 
-    print("Loading Random Forest model...")
+    print("Loading Random Forest model (first request — this may take a moment)...")
 
-    model = joblib.load(
-        MODEL_FILE
-    )
+    _model = joblib.load(MODEL_FILE)
 
-    print(
-        "Model loaded successfully."
-    )
+    print("Model loaded and cached successfully.")
 
-    return model
+    return _model
 
 
 # ---------------------------------------------------------------------
@@ -69,16 +79,13 @@ def load_model():
 
 def load_preprocessing():
     """
-    Load the preprocessing artifacts used during training.
-
-    Returns
-    -------
-    encoder :
-        Fitted OrdinalEncoder.
-
-    categorical_columns : list
-        Categorical feature names used during training.
+    Load the preprocessing artifacts (cached after first load).
     """
+
+    global _encoder, _cat_columns
+
+    if _encoder is not None and _cat_columns is not None:
+        return _encoder, _cat_columns
 
     if not PREPROCESSING_FILE.exists():
         raise FileNotFoundError(
@@ -87,53 +94,26 @@ def load_preprocessing():
             "Run ml/training/train.py first."
         )
 
-    print(
-        "Loading preprocessing artifacts..."
-    )
+    print("Loading preprocessing artifacts...")
 
-    artifacts = joblib.load(
-        PREPROCESSING_FILE
-    )
+    artifacts = joblib.load(PREPROCESSING_FILE)
 
-    if not isinstance(
-        artifacts,
-        dict
-    ):
-        raise ValueError(
-            "Invalid preprocessing artifact format."
-        )
+    if not isinstance(artifacts, dict):
+        raise ValueError("Invalid preprocessing artifact format.")
 
     if "encoder" not in artifacts:
-        raise KeyError(
-            "Encoder not found in preprocessing artifacts."
-        )
+        raise KeyError("Encoder not found in preprocessing artifacts.")
 
     if "categorical_columns" not in artifacts:
-        raise KeyError(
-            "Categorical columns not found "
-            "in preprocessing artifacts."
-        )
+        raise KeyError("Categorical columns not found in preprocessing artifacts.")
 
-    encoder = artifacts["encoder"]
+    _encoder     = artifacts["encoder"]
+    _cat_columns = artifacts["categorical_columns"]
 
-    categorical_columns = (
-        artifacts["categorical_columns"]
-    )
+    print("Preprocessing artifacts loaded and cached.")
+    print(f"Categorical Features : {_cat_columns}")
 
-    print(
-        "Preprocessing artifacts "
-        "loaded successfully."
-    )
-
-    print(
-        f"Categorical Features : "
-        f"{categorical_columns}"
-    )
-
-    return (
-        encoder,
-        categorical_columns,
-    )
+    return _encoder, _cat_columns
 
 
 # ---------------------------------------------------------------------

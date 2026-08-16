@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import {
   MapContainer,
   TileLayer,
@@ -11,7 +11,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import "./App.css";
 
-/* ── Custom SVG pin icons ───────────────────────────────────── */
+/* -- Custom SVG pin icons ------------------------------------- */
 
 const makePin = (fill: string) =>
   L.divIcon({
@@ -32,27 +32,153 @@ const makePin = (fill: string) =>
 const startPin = makePin("#1a73e8");
 const destPin  = makePin("#ea4335");
 
-/* ── Types ──────────────────────────────────────────────────── */
+/* -- Types ---------------------------------------------------- */
 
-type Location = { lat: number; lng: number };
-type Step = "pick-start" | "pick-dest" | "ready" | "loading" | "result";
+type Location   = { lat: number; lng: number; label?: string };
+type PickTarget = "start" | "dest" | null;
+
+interface NominatimResult {
+  place_id: number;
+  display_name: string;
+  lat: string;
+  lon: string;
+}
 
 interface PredictionResponse {
   severity: number;
   probabilities: { [key: string]: number };
 }
 
-/* ── Severity config ─────────────────────────────────────────── */
+/* -- Quick city presets --------------------------------------- */
+
+const QUICK_CITIES: Location[] = [
+  { lat: 28.6139, lng: 77.2090, label: "New Delhi"  },
+  { lat: 19.0760, lng: 72.8777, label: "Mumbai"     },
+  { lat: 12.9716, lng: 77.5946, label: "Bangalore"  },
+  { lat: 13.0827, lng: 80.2707, label: "Chennai"    },
+  { lat: 22.5726, lng: 88.3639, label: "Kolkata"    },
+  { lat: 17.3850, lng: 78.4867, label: "Hyderabad"  },
+  { lat: 23.0225, lng: 72.5714, label: "Ahmedabad"  },
+  { lat: 18.5204, lng: 73.8567, label: "Pune"       },
+  { lat: 26.9124, lng: 75.7873, label: "Jaipur"     },
+  { lat: 30.7333, lng: 76.7794, label: "Chandigarh" },
+];
+
+/* -- Location search input ------------------------------------- */
+
+function LocationSearch({
+  placeholder,
+  value,
+  onSelect,
+  isDropping,
+  onDropper,
+}: {
+  placeholder: string;
+  value: Location | null;
+  onSelect: (loc: Location) => void;
+  isDropping: boolean;
+  onDropper: () => void;
+}) {
+  const [query, setQuery]     = useState(value?.label ?? "");
+  const [results, setResults] = useState<NominatimResult[]>([]);
+  const [open, setOpen]       = useState(false);
+  const [busy, setBusy]       = useState(false);
+  const timerRef              = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wrapRef               = useRef<HTMLDivElement>(null);
+
+  /* Sync when external value changes (map click / city preset) */
+  useEffect(() => {
+    setQuery(value?.label ?? (value ? `${value.lat.toFixed(5)}, ${value.lng.toFixed(5)}` : ""));
+    setResults([]);
+    setOpen(false);
+  }, [value]);
+
+  /* Close on outside click */
+  useEffect(() => {
+    const h = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, []);
+
+  const search = (q: string) => {
+    setQuery(q);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    if (!q.trim()) { setResults([]); setOpen(false); return; }
+    timerRef.current = setTimeout(async () => {
+      setBusy(true);
+      try {
+        const res  = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=json&limit=5&q=${encodeURIComponent(q)}`,
+          { headers: { "Accept-Language": "en" } }
+        );
+        const data: NominatimResult[] = await res.json();
+        setResults(data);
+        setOpen(data.length > 0);
+      } catch { /* ignore */ } finally { setBusy(false); }
+    }, 350);
+  };
+
+  const pick = (r: NominatimResult) => {
+    const label = r.display_name.split(",").slice(0, 3).join(",").trim();
+    setQuery(label);
+    setResults([]);
+    setOpen(false);
+    onSelect({ lat: parseFloat(r.lat), lng: parseFloat(r.lon), label });
+  };
+
+  return (
+    <div className="loc-search" ref={wrapRef}>
+      <div className="loc-input-wrap">
+        <input
+          className="loc-input"
+          type="text"
+          placeholder={placeholder}
+          value={query}
+          onChange={e => search(e.target.value)}
+          onFocus={() => results.length > 0 && setOpen(true)}
+        />
+        {busy && <span className="loc-spin" />}
+
+        {/* Dropper button */}
+        <button
+          className={`dropper-btn ${isDropping ? "dropper-btn--active" : ""}`}
+          onClick={onDropper}
+          title={isDropping ? "Cancel map pick" : "Pick location from map"}
+        >
+          <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" fill="currentColor"/>
+            <circle cx="12" cy="9" r="2.5" fill="white"/>
+          </svg>
+        </button>
+      </div>
+
+      {open && (
+        <ul className="loc-dropdown">
+          {results.map(r => (
+            <li key={r.place_id} className="loc-option" onMouseDown={() => pick(r)}>
+              <span className="loc-icon">??</span>
+              <span className="loc-name">{r.display_name}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/* -- Severity config ------------------------------------------- */
 
 const SEV: Record<number, { label: string; color: string; bg: string; emoji: string }> = {
-  1: { label: "Low Risk",      color: "#16a34a", bg: "#dcfce7", emoji: "✅" },
-  2: { label: "Moderate Risk", color: "#d97706", bg: "#fef3c7", emoji: "⚠️" },
-  3: { label: "High Risk",     color: "#ea580c", bg: "#ffedd5", emoji: "🔴" },
-  4: { label: "Severe Risk",   color: "#dc2626", bg: "#fee2e2", emoji: "🚨" },
+  1: { label: "Low Risk",      color: "#16a34a", bg: "#dcfce7", emoji: "?" },
+  2: { label: "Moderate Risk", color: "#d97706", bg: "#fef3c7", emoji: "??" },
+  3: { label: "High Risk",     color: "#ea580c", bg: "#ffedd5", emoji: "??" },
+  4: { label: "Severe Risk",   color: "#dc2626", bg: "#fee2e2", emoji: "??" },
 };
-const sevMeta = (n: number) => SEV[n] ?? { label: "Unknown", color: "#6b7280", bg: "#f3f4f6", emoji: "❓" };
+const sevMeta = (n: number) => SEV[n] ?? { label: "Unknown", color: "#6b7280", bg: "#f3f4f6", emoji: "?" };
 
-/* ── Haversine ───────────────────────────────────────────────── */
+/* -- Haversine ------------------------------------------------- */
 
 function haversineMi(a: Location, b: Location) {
   const R = 3958.8;
@@ -63,83 +189,114 @@ function haversineMi(a: Location, b: Location) {
   return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
 }
 
-/* ── Map click handler ───────────────────────────────────────── */
+/* -- Map click handler ----------------------------------------- */
 
-function MapClickHandler({ step, onPick }: { step: Step; onPick: (l: Location) => void }) {
+function MapClickHandler({ pickTarget, onPick }: { pickTarget: PickTarget; onPick: (l: Location) => void }) {
   useMapEvents({
     click(e) {
-      if (step === "pick-start" || step === "pick-dest") {
-        onPick({ lat: e.latlng.lat, lng: e.latlng.lng });
-      }
+      if (pickTarget !== null) onPick({ lat: e.latlng.lat, lng: e.latlng.lng });
     },
   });
   return null;
 }
 
-/* ── App ─────────────────────────────────────────────────────── */
+/* -- App ------------------------------------------------------- */
 
 export default function App() {
-  const [start, setStart]   = useState<Location | null>(null);
-  const [dest,  setDest]    = useState<Location | null>(null);
-  const [step,  setStep]    = useState<Step>("pick-start");
-  const [result, setResult] = useState<PredictionResponse | null>(null);
-  const [error,  setError]  = useState("");
-  const [weather, setWeather] = useState("Clear");
-  const [hour,    setHour]    = useState(new Date().getHours());
+  const [start,      setStart]      = useState<Location | null>(null);
+  const [dest,       setDest]       = useState<Location | null>(null);
+  const [pickTarget, setPickTarget] = useState<PickTarget>("start");
+  const [result,     setResult]     = useState<PredictionResponse | null>(null);
+  const [error,      setError]      = useState("");
+  const [weather,    setWeather]    = useState("Clear");
+  const [hour,       setHour]       = useState(new Date().getHours());
+  const [analyzing,  setAnalyzing]  = useState(false);
+  const resultRef = useRef(null);
 
+  /* Auto-scroll result card into view */
+  useEffect(() => {
+    if (result && resultRef.current) {
+      resultRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [result]);
+
+  const isReady   = start !== null && dest !== null;
+  const isPicking = pickTarget !== null;
+
+  /* -- Map click -------------------------------------------- */
   const handleMapPick = useCallback((loc: Location) => {
-    if (step === "pick-start") { setStart(loc); setStep("pick-dest"); }
-    else if (step === "pick-dest") { setDest(loc); setStep("ready"); }
-  }, [step]);
+    if (pickTarget === "start") { setStart(loc); setPickTarget("dest"); setResult(null); }
+    else if (pickTarget === "dest") { setDest(loc); setPickTarget(null); setResult(null); }
+  }, [pickTarget]);
 
-  const reset = () => {
-    setStart(null); setDest(null);
-    setStep("pick-start"); setResult(null); setError("");
+  /* -- Dropper toggle --------------------------------------- */
+  const toggleDropper = (target: "start" | "dest") =>
+    setPickTarget(prev => prev === target ? null : target);
+
+  /* -- Quick city preset pick ------------------------------- */
+  const handleCityPick = (city: Location) => {
+    const target: PickTarget = pickTarget ?? (!start ? "start" : !dest ? "dest" : null);
+    if (target === "start") {
+      setStart(city);
+      setPickTarget(!dest ? "dest" : null);
+      setResult(null);
+    } else if (target === "dest") {
+      setDest(city);
+      setPickTarget(null);
+      setResult(null);
+    }
   };
 
+  /* -- Reset ------------------------------------------------ */
+  const reset = () => {
+    setStart(null); setDest(null);
+    setPickTarget("start"); setResult(null); setError("");
+  };
+
+  /* -- Analyse ---------------------------------------------- */
   const predict = async () => {
     if (!start || !dest) return;
-    setStep("loading"); setError(""); setResult(null);
+    setAnalyzing(true); setError(""); setResult(null);
 
-    const now = new Date();
+    const now   = new Date();
     const month = now.getMonth() + 1;
-    const dow = now.getDay();
+    const dow   = now.getDay();
     const hasRain = weather === "Rain" || weather === "Thunderstorm";
-    const isMorn = hour >= 7 && hour <= 10 ? 1 : 0;
-    const isEve  = hour >= 17 && hour <= 20 ? 1 : 0;
+    const isMorn  = hour >= 7  && hour <= 10 ? 1 : 0;
+    const isEve   = hour >= 17 && hour <= 20 ? 1 : 0;
 
     const body = {
-      Distance_mi:          parseFloat(haversineMi(start, dest).toFixed(3)),
-      Year:                 now.getFullYear(),
-      Start_Lng:            start.lng,
-      Start_Lat:            start.lat,
-      Pressure_in:          29.92,
-      Temperature_F:        75,
-      Month:                month,
-      Humidity_percent:     hasRain ? 85 : 55,
-      Hour:                 hour,
-      Wind_Speed_mph:       hasRain ? 12 : 6,
-      Quarter:              Math.ceil(month / 3),
-      DayOfWeek:            dow,
-      Traffic_Signal:       1,
-      Weather_Category:     weather,
-      Visibility_mi:        weather === "Fog" ? 0.5 : weather === "Snow" ? 1.5 : 8,
+      Distance_mi:            parseFloat(haversineMi(start, dest).toFixed(3)),
+      Year:                   now.getFullYear(),
+      Start_Lng:              start.lng,
+      Start_Lat:              start.lat,
+      Pressure_in:            29.92,
+      Temperature_F:          75,
+      Month:                  month,
+      Humidity_percent:       hasRain ? 85 : 55,
+      Hour:                   hour,
+      Wind_Speed_mph:         hasRain ? 12 : 6,
+      Quarter:                Math.ceil(month / 3),
+      DayOfWeek:              dow,
+      Traffic_Signal:         1,
+      Weather_Category:       weather,
+      Visibility_mi:          weather === "Fog" ? 0.5 : weather === "Snow" ? 1.5 : 8,
       NearRoadInfrastructure: 1,
-      Crossing:             0,
-      Junction:             1,
-      IsWeekend:            dow === 0 || dow === 6 ? 1 : 0,
-      IsNight:              hour < 6 || hour >= 20 ? 1 : 0,
-      IsRushHour:           isMorn || isEve,
-      Precipitation_in:     hasRain ? 0.25 : 0,
-      MorningRushHour:      isMorn,
-      EveningRushHour:      isEve,
-      Stop:                 1,
-      HasPrecipitation:     hasRain ? 1 : 0,
-      LowVisibility:        weather === "Fog" || weather === "Snow" ? 1 : 0,
-      Railway:              0,
+      Crossing:               0,
+      Junction:               1,
+      IsWeekend:              dow === 0 || dow === 6 ? 1 : 0,
+      IsNight:                hour < 6 || hour >= 20 ? 1 : 0,
+      IsRushHour:             isMorn || isEve,
+      Precipitation_in:       hasRain ? 0.25 : 0,
+      MorningRushHour:        isMorn,
+      EveningRushHour:        isEve,
+      Stop:                   1,
+      HasPrecipitation:       hasRain ? 1 : 0,
+      LowVisibility:          weather === "Fog" || weather === "Snow" ? 1 : 0,
+      Railway:                0,
     };
 
-    const ctrl = new AbortController();
+    const ctrl  = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 30000);
     try {
       const res = await fetch("/api/v1/prediction/predict", {
@@ -151,31 +308,35 @@ export default function App() {
       clearTimeout(timer);
       if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.detail ?? `HTTP ${res.status}`); }
       setResult(await res.json());
-      setStep("result");
     } catch (e: unknown) {
       clearTimeout(timer);
       setError(e instanceof DOMException && e.name === "AbortError"
         ? "Request timed out. Try again."
         : e instanceof Error ? e.message : "Could not reach backend.");
-      setStep("ready");
-    }
+    } finally { setAnalyzing(false); }
   };
 
+  /* -- Derived UI ------------------------------------------- */
   const hint =
-    step === "pick-start" ? "📍 Click the map to drop your start pin" :
-    step === "pick-dest"  ? "🏁 Click the map to drop your destination pin" :
-    step === "ready"      ? "✨ Conditions set — ready to analyse" :
-    step === "loading"    ? "🔍 Analysing route safety…" :
-                            "✅ Analysis complete";
+    analyzing              ? "?? Analysing route safety�"              :
+    result                 ? "? Analysis complete"                      :
+    pickTarget === "start" ? "?? Click map or search to set start"      :
+    pickTarget === "dest"  ? "?? Click map or search to set destination" :
+                             "? Conditions set � ready to analyse";
 
-  const meta = result ? sevMeta(result.severity) : null;
+  const dotClass =
+    analyzing              ? "step-dot--loading"    :
+    result                 ? "step-dot--result"     :
+    pickTarget === "start" ? "step-dot--pick-start" :
+    pickTarget === "dest"  ? "step-dot--pick-dest"  : "step-dot--ready";
+
+  const meta      = result ? sevMeta(result.severity) : null;
   const polyColor = meta ? meta.color : "#1a73e8";
-  const isPicking = step === "pick-start" || step === "pick-dest";
 
   return (
     <div className="app">
 
-      {/* ── Sidebar ──────────────────────────────────── */}
+      {/* -- Sidebar ------------------------------------ */}
       <aside className="sidebar">
 
         <div className="sidebar-brand">
@@ -192,8 +353,8 @@ export default function App() {
         </div>
 
         {/* Step hint */}
-        <div className={`step-pill ${step === "loading" ? "step-pill--pulse" : ""}`}>
-          <span className={`step-dot step-dot--${step}`} />
+        <div className={`step-pill ${analyzing ? "step-pill--pulse" : ""}`}>
+          <span className={`step-dot ${dotClass}`} />
           <span>{hint}</span>
         </div>
 
@@ -203,10 +364,16 @@ export default function App() {
             <div className="pin-circle pin-circle--start">A</div>
             <div className="pin-detail">
               <span>Start point</span>
-              <p>{start ? `${start.lat.toFixed(5)}, ${start.lng.toFixed(5)}` : "Click map to set"}</p>
+              <LocationSearch
+                placeholder="Search start location�"
+                value={start}
+                onSelect={loc => { setStart(loc); setPickTarget(!dest ? "dest" : null); setResult(null); }}
+                isDropping={pickTarget === "start"}
+                onDropper={() => toggleDropper("start")}
+              />
             </div>
             {start && (
-              <button className="pin-x" onClick={() => { setStart(null); setStep("pick-start"); setResult(null); }} title="Remove">✕</button>
+              <button className="pin-x" onClick={() => { setStart(null); setPickTarget("start"); setResult(null); }} title="Remove">?</button>
             )}
           </div>
 
@@ -216,11 +383,50 @@ export default function App() {
             <div className="pin-circle pin-circle--dest">B</div>
             <div className="pin-detail">
               <span>Destination</span>
-              <p>{dest ? `${dest.lat.toFixed(5)}, ${dest.lng.toFixed(5)}` : "Click map to set"}</p>
+              <LocationSearch
+                placeholder="Search destination�"
+                value={dest}
+                onSelect={loc => { setDest(loc); setPickTarget(null); setResult(null); }}
+                isDropping={pickTarget === "dest"}
+                onDropper={() => toggleDropper("dest")}
+              />
             </div>
             {dest && (
-              <button className="pin-x" onClick={() => { setDest(null); setStep(start ? "pick-dest" : "pick-start"); setResult(null); }} title="Remove">✕</button>
+              <button className="pin-x" onClick={() => { setDest(null); setPickTarget("dest"); setResult(null); }} title="Remove">?</button>
             )}
+          </div>
+        </div>
+
+        {/* -- Quick city presets ------------------------- */}
+        <div className="quick-cities">
+          <div className="quick-cities-header">
+            <p className="cond-title" style={{ margin: 0 }}>Quick locations</p>
+            {pickTarget && (
+              <span className={`setting-badge setting-badge--${pickTarget}`}>
+                Setting: {pickTarget === "start" ? "? Start" : "? Dest"}
+              </span>
+            )}
+            {!pickTarget && isReady && (
+              <span className="setting-badge setting-badge--done">Both set ?</span>
+            )}
+          </div>
+          <div className="city-chips">
+            {QUICK_CITIES.map(city => {
+              const isStart = start?.label === city.label;
+              const isDest  = dest?.label  === city.label;
+              return (
+                <button
+                  key={city.label}
+                  className={`city-chip ${isStart ? "city-chip--start" : isDest ? "city-chip--dest" : ""}`}
+                  onClick={() => handleCityPick(city)}
+                  title={isStart ? "Currently: Start" : isDest ? "Currently: Destination" : "Click to set"}
+                >
+                  {isStart && <span className="city-badge city-badge--a">A</span>}
+                  {isDest  && <span className="city-badge city-badge--b">B</span>}
+                  {city.label}
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -229,8 +435,8 @@ export default function App() {
           <p className="cond-title">Weather condition</p>
           <div className="weather-chips">
             {[
-              ["Clear","☀️"], ["Cloudy","☁️"], ["Rain","🌧️"],
-              ["Fog","🌫️"], ["Snow","❄️"], ["Thunderstorm","⛈️"],
+              ["Clear","??"], ["Cloudy","??"], ["Rain","???"],
+              ["Fog","???"],  ["Snow","??"],  ["Thunderstorm","??"],
             ].map(([w, icon]) => (
               <button
                 key={w}
@@ -243,7 +449,7 @@ export default function App() {
           </div>
 
           <p className="cond-title" style={{ marginTop: 18 }}>
-            Departure time — <strong>{String(hour).padStart(2, "0")}:00</strong>
+            Departure time � <strong>{String(hour).padStart(2, "0")}:00</strong>
           </p>
           <input
             type="range" min={0} max={23} value={hour}
@@ -259,12 +465,10 @@ export default function App() {
         <div className="cta">
           <button
             className="btn-primary"
-            disabled={step !== "ready" && step !== "result"}
+            disabled={!isReady || analyzing}
             onClick={predict}
           >
-            {step === "loading"
-              ? <span className="spin" />
-              : "Analyse Route Safety"}
+            {analyzing ? <span className="spin" /> : "Analyse Route Safety"}
           </button>
           {(start || dest) && (
             <button className="btn-ghost" onClick={reset}>Reset map</button>
@@ -275,8 +479,8 @@ export default function App() {
         {error && <div className="err-box">{error}</div>}
 
         {/* Result */}
-        {result && meta && step === "result" && (
-          <div className="result-card" style={{ "--c": meta.color, "--bg": meta.bg } as React.CSSProperties}>
+        {result && meta && (
+          <div ref={resultRef} className="result-card" style={{ "--c": meta.color, "--bg": meta.bg } as React.CSSProperties}>
 
             <div className="result-header">
               <span className="result-emoji">{meta.emoji}</span>
@@ -307,9 +511,9 @@ export default function App() {
 
             {start && dest && (
               <div className="result-meta">
-                <div className="meta-chip"><span>📏</span><strong>{haversineMi(start, dest).toFixed(2)} mi</strong></div>
-                <div className="meta-chip"><span>🌤</span><strong>{weather}</strong></div>
-                <div className="meta-chip"><span>🕐</span><strong>{hour}:00</strong></div>
+                <div className="meta-chip"><span>??</span><strong>{haversineMi(start, dest).toFixed(2)} mi</strong></div>
+                <div className="meta-chip"><span>??</span><strong>{weather}</strong></div>
+                <div className="meta-chip"><span>??</span><strong>{hour}:00</strong></div>
               </div>
             )}
           </div>
@@ -317,30 +521,25 @@ export default function App() {
 
       </aside>
 
-      {/* ── Map ────────────────────────────────────────── */}
+      {/* -- Map ------------------------------------------ */}
       <div className={`map-area ${isPicking ? "map-area--picking" : ""}`}>
-        <MapContainer
-          center={[20.59, 78.96]}
-          zoom={5}
-          className="lmap"
-          zoomControl={false}
-        >
+        <MapContainer center={[20.59, 78.96]} zoom={5} className="lmap" zoomControl={false}>
           <TileLayer
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
 
-          <MapClickHandler step={step} onPick={handleMapPick} />
+          <MapClickHandler pickTarget={pickTarget} onPick={handleMapPick} />
 
           {start && (
             <Marker position={[start.lat, start.lng]} icon={startPin}>
-              <Popup><strong>📍 Start</strong><br />{start.lat.toFixed(5)}, {start.lng.toFixed(5)}</Popup>
+              <Popup><strong>?? Start</strong><br />{start.label ?? `${start.lat.toFixed(5)}, ${start.lng.toFixed(5)}`}</Popup>
             </Marker>
           )}
 
           {dest && (
             <Marker position={[dest.lat, dest.lng]} icon={destPin}>
-              <Popup><strong>🏁 Destination</strong><br />{dest.lat.toFixed(5)}, {dest.lng.toFixed(5)}</Popup>
+              <Popup><strong>?? Destination</strong><br />{dest.label ?? `${dest.lat.toFixed(5)}, ${dest.lng.toFixed(5)}`}</Popup>
             </Marker>
           )}
 
@@ -351,7 +550,7 @@ export default function App() {
                 color: polyColor,
                 weight: 5,
                 opacity: 0.85,
-                dashArray: step === "result" ? undefined : "12 8",
+                dashArray: result ? undefined : "12 8",
               }}
             />
           )}
@@ -359,7 +558,7 @@ export default function App() {
 
         {isPicking && (
           <div className="map-hint">
-            {step === "pick-start" ? "📍 Click to set start" : "🏁 Click to set destination"}
+            {pickTarget === "start" ? "?? Click to set start" : "?? Click to set destination"}
           </div>
         )}
       </div>
