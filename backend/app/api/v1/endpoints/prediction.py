@@ -1,9 +1,12 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
 
+from app.database.connection import get_db
 from app.schemas.prediction import (
     PredictionRequest,
     PredictionResponse,
 )
+from app.services.prediction_service import save_prediction
 
 from ml.inference.inference import predict_severity
 
@@ -15,9 +18,16 @@ router = APIRouter()
     "/predict",
     response_model=PredictionResponse,
 )
-def predict(request: PredictionRequest):
+def predict(
+    request: PredictionRequest,
+    db: Session = Depends(get_db),
+):
 
     try:
+
+        # ---------------------------------------------------------
+        # Convert API fields to ML feature names
+        # ---------------------------------------------------------
 
         input_data = {
             "Distance(mi)": request.Distance_mi,
@@ -50,14 +60,36 @@ def predict(request: PredictionRequest):
             "Railway": request.Railway,
         }
 
+        # ---------------------------------------------------------
+        # Run Random Forest inference
+        # ---------------------------------------------------------
+
         result = predict_severity(input_data)
 
-        return PredictionResponse(
+        response = PredictionResponse(
             severity=result["severity"],
             probabilities=result["probabilities"],
         )
 
+        # ---------------------------------------------------------
+        # Save prediction to PostgreSQL
+        # ---------------------------------------------------------
+
+        save_prediction(
+            db=db,
+            request=request,
+            response=response,
+        )
+
+        # ---------------------------------------------------------
+        # Return prediction to frontend
+        # ---------------------------------------------------------
+
+        return response
+
     except Exception as e:
+
+        db.rollback()
 
         raise HTTPException(
             status_code=500,

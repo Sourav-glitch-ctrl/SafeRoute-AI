@@ -49,6 +49,12 @@ interface PredictionResponse {
   probabilities: { [key: string]: number };
 }
 
+interface RouteResponse {
+  coordinates: [number, number][];
+  distance: number;
+  duration: number;
+}
+
 /* -- Quick city presets --------------------------------------- */
 
 const QUICK_CITIES: Location[] = [
@@ -189,6 +195,50 @@ function haversineMi(a: Location, b: Location) {
   return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
 }
 
+function sampleRoutePoints(
+  coordinates: [number, number][],
+  intervalKm = 1
+): [number, number][] {
+  if (coordinates.length === 0) {
+    return [];
+  }
+
+  const sampled: [number, number][] = [coordinates[0]];
+
+  let distanceSinceLastSample = 0;
+
+  for (let i = 1; i < coordinates.length; i++) {
+    const previous: Location = {
+      lat: coordinates[i - 1][0],
+      lng: coordinates[i - 1][1],
+    };
+
+    const current: Location = {
+      lat: coordinates[i][0],
+      lng: coordinates[i][1],
+    };
+
+    const segmentDistance =
+      haversineMi(previous, current) * 1.60934;
+
+    distanceSinceLastSample += segmentDistance;
+
+    if (distanceSinceLastSample >= intervalKm) {
+      sampled.push(coordinates[i]);
+      distanceSinceLastSample = 0;
+    }
+  }
+
+  // Always include destination
+  const last = coordinates[coordinates.length - 1];
+
+  if (sampled[sampled.length - 1] !== last) {
+    sampled.push(last);
+  }
+
+  return sampled;
+}
+
 /* -- Map click handler ----------------------------------------- */
 
 function MapClickHandler({ pickTarget, onPick }: { pickTarget: PickTarget; onPick: (l: Location) => void }) {
@@ -207,11 +257,13 @@ export default function App() {
   const [dest,       setDest]       = useState<Location | null>(null);
   const [pickTarget, setPickTarget] = useState<PickTarget>("start");
   const [result,     setResult]     = useState<PredictionResponse | null>(null);
+  const [route, setRoute] = useState<RouteResponse | null>(null);
+  const [routeLoading, setRouteLoading] = useState(false);
   const [error,      setError]      = useState("");
   const [weather,    setWeather]    = useState("Clear");
   const [hour,       setHour]       = useState(new Date().getHours());
   const [analyzing,  setAnalyzing]  = useState(false);
-  const resultRef = useRef(null);
+  const resultRef = useRef<HTMLDivElement>(null);
 
   /* Auto-scroll result card into view */
   useEffect(() => {
@@ -250,13 +302,89 @@ export default function App() {
   /* -- Reset ------------------------------------------------ */
   const reset = () => {
     setStart(null); setDest(null);
-    setPickTarget("start"); setResult(null); setError("");
+    setPickTarget("start"); setResult(null); setRoute(null); setError("");
+  };
+
+  const getRoute = async (
+    from: Location,
+    to: Location
+  ): Promise<RouteResponse> => {
+    setRouteLoading(true);
+
+    try {
+      const url =
+        `https://router.project-osrm.org/route/v1/driving/` +
+        `${from.lng},${from.lat};${to.lng},${to.lat}` +
+        `?overview=full&geometries=geojson`;
+
+      const res = await fetch(url);
+
+      if (!res.ok) {
+        throw new Error("Could not calculate road route.");
+      }
+
+      const data = await res.json();
+
+      if (!data.routes || data.routes.length === 0) {
+        throw new Error("No road route found.");
+      }
+
+      const selectedRoute = data.routes[0];
+
+      const coordinates: [number, number][] =
+        selectedRoute.geometry.coordinates.map(
+          ([lng, lat]: [number, number]) => [lat, lng]
+        );
+
+      const routeData: RouteResponse = {
+        coordinates,
+        distance: selectedRoute.distance / 1609.344,
+        duration: selectedRoute.duration / 60,
+      };
+
+      setRoute(routeData);
+
+      return routeData;
+
+    } catch (e: unknown) {
+      setRoute(null);
+      throw e instanceof Error
+        ? e
+        : new Error("Could not calculate road route.");
+    } finally {
+      setRouteLoading(false);
+    }
   };
 
   /* -- Analyse ---------------------------------------------- */
   const predict = async () => {
     if (!start || !dest) return;
-    setAnalyzing(true); setError(""); setResult(null);
+    setAnalyzing(true);
+    setError("");
+    setResult(null);
+
+    let currentRoute: RouteResponse;
+
+    try {
+      currentRoute = await getRoute(start, dest);
+    } catch (e: unknown) {
+      setError(
+        e instanceof Error
+          ? e.message
+          : "Could not calculate road route."
+      );
+      setAnalyzing(false);
+      return;
+    }
+
+    const routePoints = sampleRoutePoints(
+      currentRoute.coordinates,
+      1
+    );
+
+    console.log("Total route points:", currentRoute.coordinates.length);
+    console.log("Sampled route points:", routePoints.length);
+    console.log("Route points:", routePoints);
 
     const now   = new Date();
     const month = now.getMonth() + 1;
@@ -266,7 +394,9 @@ export default function App() {
     const isEve   = hour >= 17 && hour <= 20 ? 1 : 0;
 
     const body = {
-      Distance_mi:            parseFloat(haversineMi(start, dest).toFixed(3)),
+      Distance_mi: parseFloat(
+        currentRoute.distance.toFixed(3)
+      ),
       Year:                   now.getFullYear(),
       Start_Lng:              start.lng,
       Start_Lat:              start.lat,
@@ -509,11 +639,27 @@ export default function App() {
                 })}
             </div>
 
-            {start && dest && (
+            {route && (
               <div className="result-meta">
-                <div className="meta-chip"><span>??</span><strong>{haversineMi(start, dest).toFixed(2)} mi</strong></div>
-                <div className="meta-chip"><span>??</span><strong>{weather}</strong></div>
-                <div className="meta-chip"><span>??</span><strong>{hour}:00</strong></div>
+                <div className="meta-chip">
+                  <span>📍</span>
+                  <strong>{route.distance.toFixed(2)} mi</strong>
+                </div>
+
+                <div className="meta-chip">
+                  <span>⏱</span>
+                  <strong>{Math.round(route.duration)} min</strong>
+                </div>
+
+                <div className="meta-chip">
+                  <span>🌦</span>
+                  <strong>{weather}</strong>
+                </div>
+
+                <div className="meta-chip">
+                  <span>🕐</span>
+                  <strong>{hour}:00</strong>
+                </div>
               </div>
             )}
           </div>
@@ -533,24 +679,23 @@ export default function App() {
 
           {start && (
             <Marker position={[start.lat, start.lng]} icon={startPin}>
-              <Popup><strong>?? Start</strong><br />{start.label ?? `${start.lat.toFixed(5)}, ${start.lng.toFixed(5)}`}</Popup>
+              <Popup><strong>📍 Start</strong><br />{start.label ?? `${start.lat.toFixed(5)}, ${start.lng.toFixed(5)}`}</Popup>
             </Marker>
           )}
 
           {dest && (
             <Marker position={[dest.lat, dest.lng]} icon={destPin}>
-              <Popup><strong>?? Destination</strong><br />{dest.label ?? `${dest.lat.toFixed(5)}, ${dest.lng.toFixed(5)}`}</Popup>
+              <Popup><strong>🏁 Destination</strong><br />{dest.label ?? `${dest.lat.toFixed(5)}, ${dest.lng.toFixed(5)}`}</Popup>
             </Marker>
           )}
 
-          {start && dest && (
+          {route && (
             <Polyline
-              positions={[[start.lat, start.lng], [dest.lat, dest.lng]]}
+              positions={route.coordinates}
               pathOptions={{
                 color: polyColor,
-                weight: 5,
-                opacity: 0.85,
-                dashArray: result ? undefined : "12 8",
+                weight: 6,
+                opacity: 0.9,
               }}
             />
           )}

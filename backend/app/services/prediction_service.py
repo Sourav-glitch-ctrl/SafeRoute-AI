@@ -1,73 +1,55 @@
-"""
-SafeRoute AI - Prediction Service
+from sqlalchemy.orm import Session
 
-Connects the FastAPI backend with the ML inference layer.
-"""
-
-import sys
-from pathlib import Path
+from app.models.prediction import Prediction
+from app.schemas.prediction import PredictionRequest, PredictionResponse
 
 
-# ---------------------------------------------------------------------
-# Project Path
-# ---------------------------------------------------------------------
+def save_prediction(
+    db: Session,
+    request: PredictionRequest,
+    response: PredictionResponse,
+) -> Prediction:
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+    probabilities = response.probabilities
 
-INFERENCE_DIR = PROJECT_ROOT / "ml" / "inference"
+    prediction = Prediction(
+        distance_mi=request.Distance_mi,
+        year=request.Year,
+        start_lng=request.Start_Lng,
+        start_lat=request.Start_Lat,
+        pressure_in=request.Pressure_in,
+        temperature_f=request.Temperature_F,
+        month=request.Month,
+        humidity_percent=request.Humidity_percent,
+        hour=request.Hour,
+        wind_speed_mph=request.Wind_Speed_mph,
+        quarter=request.Quarter,
+        day_of_week=request.DayOfWeek,
+        traffic_signal=request.Traffic_Signal,
+        weather_category=request.Weather_Category,
+        visibility_mi=request.Visibility_mi,
+        near_road_infrastructure=request.NearRoadInfrastructure,
+        crossing=request.Crossing,
+        junction=request.Junction,
+        is_weekend=request.IsWeekend,
+        is_night=request.IsNight,
+        is_rush_hour=request.IsRushHour,
+        precipitation_in=request.Precipitation_in,
+        morning_rush_hour=request.MorningRushHour,
+        evening_rush_hour=request.EveningRushHour,
+        stop=request.Stop,
+        has_precipitation=request.HasPrecipitation,
+        low_visibility=request.LowVisibility,
+        railway=request.Railway,
+        severity=response.severity,
+        probability_1=probabilities.get(1),
+        probability_2=probabilities.get(2),
+        probability_3=probabilities.get(3),
+        probability_4=probabilities.get(4),
+    )
 
-if str(INFERENCE_DIR) not in sys.path:
-    sys.path.insert(0, str(INFERENCE_DIR))
+    db.add(prediction)
+    db.commit()
+    db.refresh(prediction)
 
-
-# ---------------------------------------------------------------------
-# Import ML Inference
-# ---------------------------------------------------------------------
-
-from inference import run_inference
-
-
-# ---------------------------------------------------------------------
-# Prediction Service
-# ---------------------------------------------------------------------
-
-def predict_severity(data: dict):
-    """
-    Convert API input into the format expected by the ML model
-    and run inference.
-    """
-
-    model_input = {
-        "Distance(mi)": data["Distance_mi"],
-        "Year": data["Year"],
-        "Start_Lng": data["Start_Lng"],
-        "Start_Lat": data["Start_Lat"],
-        "Pressure(in)": data["Pressure_in"],
-        "Temperature(F)": data["Temperature_F"],
-        "Month": data["Month"],
-        "Humidity(%)": data["Humidity_percent"],
-        "Hour": data["Hour"],
-        "Wind_Speed(mph)": data["Wind_Speed_mph"],
-        "Quarter": data["Quarter"],
-        "DayOfWeek": data["DayOfWeek"],
-        "Traffic_Signal": data["Traffic_Signal"],
-        "Weather_Category": data["Weather_Category"],
-        "Visibility(mi)": data["Visibility_mi"],
-        "NearRoadInfrastructure": data[
-            "NearRoadInfrastructure"
-        ],
-        "Crossing": data["Crossing"],
-        "Junction": data["Junction"],
-        "IsWeekend": data["IsWeekend"],
-        "IsNight": data["IsNight"],
-        "IsRushHour": data["IsRushHour"],
-        "Precipitation(in)": data["Precipitation_in"],
-        "MorningRushHour": data["MorningRushHour"],
-        "EveningRushHour": data["EveningRushHour"],
-        "Stop": data["Stop"],
-        "HasPrecipitation": data["HasPrecipitation"],
-        "LowVisibility": data["LowVisibility"],
-        "Railway": data["Railway"],
-    }
-
-    return run_inference(model_input)
+    return prediction
