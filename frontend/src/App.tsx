@@ -49,6 +49,18 @@ interface PredictionResponse {
   probabilities: { [key: string]: number };
 }
 
+interface RoutePredictionPoint {
+  lat: number;
+  lng: number;
+  severity: number;
+  probability: number;
+}
+
+interface RoutePredictionResponse {
+  overall_severity: number;
+  points: RoutePredictionPoint[];
+}
+
 interface RouteResponse {
   coordinates: [number, number][];
   distance: number;
@@ -195,6 +207,27 @@ function haversineMi(a: Location, b: Location) {
   return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
 }
 
+function getRepresentativePoints(
+  coordinates: [number, number][],
+  count = 5
+): [number, number][] {
+  if (coordinates.length <= count) {
+    return coordinates;
+  }
+
+  const points: [number, number][] = [];
+
+  for (let i = 0; i < count; i++) {
+    const index = Math.round(
+      (i / (count - 1)) * (coordinates.length - 1)
+    );
+
+    points.push(coordinates[index]);
+  }
+
+  return points;
+}
+
 function sampleRoutePoints(
   coordinates: [number, number][],
   intervalKm = 1
@@ -256,7 +289,7 @@ export default function App() {
   const [start,      setStart]      = useState<Location | null>(null);
   const [dest,       setDest]       = useState<Location | null>(null);
   const [pickTarget, setPickTarget] = useState<PickTarget>("start");
-  const [result,     setResult]     = useState<PredictionResponse | null>(null);
+  const [result,     setResult]     = useState<RoutePredictionResponse | null>(null);
   const [route, setRoute] = useState<RouteResponse | null>(null);
   const [routeLoading, setRouteLoading] = useState(false);
   const [error,      setError]      = useState("");
@@ -377,59 +410,17 @@ export default function App() {
       return;
     }
 
-    const routePoints = sampleRoutePoints(
-      currentRoute.coordinates,
-      1
-    );
-
-    console.log("Total route points:", currentRoute.coordinates.length);
-    console.log("Sampled route points:", routePoints.length);
-    console.log("Route points:", routePoints);
-
-    const now   = new Date();
-    const month = now.getMonth() + 1;
-    const dow   = now.getDay();
-    const hasRain = weather === "Rain" || weather === "Thunderstorm";
-    const isMorn  = hour >= 7  && hour <= 10 ? 1 : 0;
-    const isEve   = hour >= 17 && hour <= 20 ? 1 : 0;
+    const routePoints = getRepresentativePoints(currentRoute.coordinates, 5);
 
     const body = {
-      Distance_mi: parseFloat(
-        currentRoute.distance.toFixed(3)
-      ),
-      Year:                   now.getFullYear(),
-      Start_Lng:              start.lng,
-      Start_Lat:              start.lat,
-      Pressure_in:            29.92,
-      Temperature_F:          75,
-      Month:                  month,
-      Humidity_percent:       hasRain ? 85 : 55,
-      Hour:                   hour,
-      Wind_Speed_mph:         hasRain ? 12 : 6,
-      Quarter:                Math.ceil(month / 3),
-      DayOfWeek:              dow,
-      Traffic_Signal:         1,
-      Weather_Category:       weather,
-      Visibility_mi:          weather === "Fog" ? 0.5 : weather === "Snow" ? 1.5 : 8,
-      NearRoadInfrastructure: 1,
-      Crossing:               0,
-      Junction:               1,
-      IsWeekend:              dow === 0 || dow === 6 ? 1 : 0,
-      IsNight:                hour < 6 || hour >= 20 ? 1 : 0,
-      IsRushHour:             isMorn || isEve,
-      Precipitation_in:       hasRain ? 0.25 : 0,
-      MorningRushHour:        isMorn,
-      EveningRushHour:        isEve,
-      Stop:                   1,
-      HasPrecipitation:       hasRain ? 1 : 0,
-      LowVisibility:          weather === "Fog" || weather === "Snow" ? 1 : 0,
-      Railway:                0,
+      points: routePoints.map(([lat, lng]) => ({ lat, lng })),
+      distance_mi: parseFloat(currentRoute.distance.toFixed(3)),
     };
 
     const ctrl  = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 30000);
+    const timer = setTimeout(() => ctrl.abort(), 60000); // 60s timeout since we hit multiple endpoints now
     try {
-      const res = await fetch("/api/v1/prediction/predict", {
+      const res = await fetch("/api/v1/prediction/route", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -460,7 +451,7 @@ export default function App() {
     pickTarget === "start" ? "step-dot--pick-start" :
     pickTarget === "dest"  ? "step-dot--pick-dest"  : "step-dot--ready";
 
-  const meta      = result ? sevMeta(result.severity) : null;
+  const meta      = result ? sevMeta(result.overall_severity) : null;
   const polyColor = meta ? meta.color : "#1a73e8";
 
   return (
@@ -618,25 +609,23 @@ export default function App() {
                 <p>Predicted Severity</p>
                 <h2 style={{ color: meta.color }}>{meta.label}</h2>
               </div>
-              <div className="result-num">{result.severity}</div>
+              <div className="result-num">{result.overall_severity}</div>
             </div>
 
             <div className="prob-section">
-              <p className="prob-heading">Class probabilities</p>
-              {Object.entries(result.probabilities)
-                .sort(([a], [b]) => Number(a) - Number(b))
-                .map(([sev, p]) => {
-                  const m = sevMeta(Number(sev));
-                  return (
-                    <div key={sev} className="prob-row">
-                      <span className="prob-sev" style={{ color: m.color }}>S{sev}</span>
-                      <div className="prob-track">
-                        <div className="prob-fill" style={{ width: `${(p * 100).toFixed(1)}%`, background: m.color }} />
-                      </div>
-                      <span className="prob-pct">{(p * 100).toFixed(1)}%</span>
+              <p className="prob-heading">Route Points Breakdown</p>
+              {result.points.map((pt, i) => {
+                const m = sevMeta(pt.severity);
+                return (
+                  <div key={i} className="prob-row">
+                    <span className="prob-sev" style={{ color: m.color, minWidth: "55px" }}>Pt {i + 1}</span>
+                    <div className="prob-track">
+                      <div className="prob-fill" style={{ width: `${(pt.probability * 100).toFixed(1)}%`, background: m.color }} />
                     </div>
-                  );
-                })}
+                    <span className="prob-pct">S{pt.severity} ({(pt.probability * 100).toFixed(1)}%)</span>
+                  </div>
+                );
+              })}
             </div>
 
             {route && (

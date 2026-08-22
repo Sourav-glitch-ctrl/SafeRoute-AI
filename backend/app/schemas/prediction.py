@@ -1,3 +1,4 @@
+from typing import List
 from pydantic import BaseModel
 
 
@@ -38,3 +39,25 @@ class PredictionRequest(BaseModel):
 class PredictionResponse(BaseModel):
     severity: int
     probabilities: dict[int, float]
+
+
+class RoutePoint(BaseModel):
+    lat: float
+    lng: float
+
+
+class RoutePredictionRequest(BaseModel):
+    points: List[RoutePoint]
+    distance_mi: float
+
+
+class RoutePredictionPoint(BaseModel):
+    lat: float
+    lng: float
+    severity: int
+    probability: float
+
+
+class RoutePredictionResponse(BaseModel):
+    overall_severity: int
+    points: List[RoutePredictionPoint]
